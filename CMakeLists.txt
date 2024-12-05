@@ -411,7 +411,7 @@ function(mx_add_library MATERIALX_MODULE_NAME)
                     EXPORT MaterialX
                     ARCHIVE DESTINATION ${MATERIALX_INSTALL_LIB_PATH}
                     LIBRARY DESTINATION ${MATERIALX_INSTALL_LIB_PATH}
-                    RUNTIME DESTINATION bin
+                    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
                     FILE_SET mxHeaders)
         endif()
 
@@ -513,7 +513,7 @@ if (MATERIALX_BUILD_MONOLITHIC)
                 EXPORT MaterialX
                 ARCHIVE DESTINATION ${MATERIALX_INSTALL_LIB_PATH}
                 LIBRARY DESTINATION ${MATERIALX_INSTALL_LIB_PATH}
-                RUNTIME DESTINATION bin
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
                 FILE_SET mxHeaders)
 
         # Note : we don't install the headers etc. here, and rely on each separate modules CMakeLists.txt
@@ -553,7 +553,7 @@ if(NOT SKBUILD)
     install(FILES LICENSE CHANGELOG.md README.md THIRD-PARTY.md
             DESTINATION .)
 
-    set(MATERIALX_GEN_CONFIG_PATH "${MATERIALX_INSTALL_LIB_PATH}/cmake/${CMAKE_PROJECT_NAME}")
+    set(MATERIALX_GEN_CONFIG_PATH "cmake")
 
     include(CMakePackageConfigHelpers)
 

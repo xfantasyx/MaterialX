@@ -49,7 +49,7 @@ class MX_FORMAT_API FilePath
         _type(TypeRelative)
     {
     }
-    ~FilePath() { }
+    ~FilePath() = default;
 
     bool operator==(const FilePath& rhs) const
     {
@@ -188,7 +188,8 @@ class MX_FORMAT_API FilePath
     bool isDirectory() const;
 
     /// Return a vector of all files in the given directory with the given extension.
-    FilePathVec getFilesInDirectory(const string& extension) const;
+    /// If extension is empty all files are returned.
+    FilePathVec getFilesInDirectory(const string& extension = EMPTY_STRING) const;
 
     /// Return a vector of all directories at or beneath the given path.
     FilePathVec getSubDirectories() const;

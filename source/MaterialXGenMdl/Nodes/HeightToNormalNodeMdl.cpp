@@ -5,9 +5,7 @@
 
 #include <MaterialXGenMdl/Nodes/HeightToNormalNodeMdl.h>
 
-#include <MaterialXGenMdl/MdlShaderGenerator.h>
-
-#include <MaterialXGenShader/Shader.h>
+#include <MaterialXGenShader/Exception.h>
 #include <MaterialXGenShader/GenContext.h>
 
 MATERIALX_NAMESPACE_BEGIN
@@ -42,7 +40,8 @@ void HeightToNormalNodeMdl::computeSampleOffsetStrings(const string& sampleSizeN
     {
         for (int col = -1; col <= 1; col++)
         {
-            offsetStrings.push_back(" + " + sampleSizeName + " * " + offsetTypeString + "(" + std::to_string(float(col)) + "," + std::to_string(float(row)) + ")");
+            offsetStrings.emplace_back(" + " + sampleSizeName + " * " + offsetTypeString +
+                                       "(" + std::to_string(float(col)) + "," + std::to_string(float(row)) + ")");
         }
     }
 }
@@ -101,11 +100,6 @@ void HeightToNormalNodeMdl::emitFunctionCall(const ShaderNode& node, GenContext&
         shadergen.emitString(")", stage);
         shadergen.emitLineEnd(stage);
     }
-}
-
-const string& HeightToNormalNodeMdl::getTarget() const
-{
-    return MdlShaderGenerator::TARGET;
 }
 
 MATERIALX_NAMESPACE_END

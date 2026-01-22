@@ -5,9 +5,18 @@
 
 #include <MaterialXGenShader/Util.h>
 
-#include <MaterialXGenShader/HwShaderGenerator.h>
-
 MATERIALX_NAMESPACE_BEGIN
+
+/// Gaussian kernel weights for different kernel sizes.
+const std::array<float, 3> GAUSSIAN_KERNEL_3 = {
+    0.27901f, 0.44198f, 0.27901f // Sigma 1
+};
+const std::array<float, 5> GAUSSIAN_KERNEL_5 = {
+    0.06136f, 0.24477f, 0.38774f, 0.24477f, 0.06136f // Sigma 1
+};
+const std::array<float, 7> GAUSSIAN_KERNEL_7 = {
+    0.00598f, 0.060626f, 0.241843f, 0.383103f, 0.241843f, 0.060626f, 0.00598f // Sigma 1
+};
 
 namespace
 {
@@ -125,11 +134,11 @@ bool isTransparentShaderNode(NodePtr node, NodePtr interfaceNode)
         string inputName = item.first;
         if (item.second == Input::TRANSPARENCY_HINT)
         {
-            inputPairList.push_back(std::make_pair(inputName, 0.0f) );
+            inputPairList.emplace_back(inputName, 0.0f);
         }
         else if (item.second == Input::OPACITY_HINT)
         {
-            inputPairList.push_back(std::make_pair(inputName, 1.0f));
+            inputPairList.emplace_back(inputName, 1.0f);
         }
     }
 
@@ -145,7 +154,7 @@ bool isTransparentShaderNode(NodePtr node, NodePtr interfaceNode)
                 const string& interfaceName = checkInput->getInterfaceName();
                 if (!interfaceName.empty())
                 {
-                    interfaceNames.push_back(std::make_pair(interfaceName, inputPair.second));
+                    interfaceNames.emplace_back(interfaceName, inputPair.second);
                 }
             }
         }
@@ -228,8 +237,7 @@ bool isTransparentShaderGraph(OutputPtr output, const string& target, NodePtr in
             NodeDefPtr nodeDef = node->getNodeDef();
             if (nodeDef)
             {
-                const TypeDesc nodeDefType = TypeDesc::get(nodeDef->getType());
-                if (nodeDefType == Type::BSDF)
+                if (nodeDef->getType() == BSDF_TYPE_STRING)
                 {
                     InterfaceElementPtr impl = nodeDef->getImplementation(target);
                     if (impl && impl->isA<NodeGraph>())

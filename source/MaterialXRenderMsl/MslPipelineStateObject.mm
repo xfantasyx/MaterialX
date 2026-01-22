@@ -10,8 +10,8 @@
 #include <MaterialXRender/LightHandler.h>
 #include <MaterialXRender/ShaderRenderer.h>
 
-#include <MaterialXGenShader/HwShaderGenerator.h>
 #include <MaterialXGenMsl/MslShaderGenerator.h>
+#include <MaterialXGenHw/HwConstants.h>
 #include <MaterialXGenShader/Util.h>
 
 #include <iostream>
@@ -66,9 +66,6 @@ void MslProgram::setStages(ShaderPtr shader)
         const ShaderStage& stage = shader->getStage(i);
         addStage(stage.getName(), stage.getSourceCode());
     }
-
-    // A stage change invalidates any cached parsed inputs
-    clearInputLists();
 }
 
 void MslProgram::addStage(const string& stage, const string& sourceCode)
@@ -301,6 +298,8 @@ id<MTLRenderPipelineState> MslProgram::build(id<MTLDevice> device, MetalFramebuf
         throw ExceptionRenderError(errorType, errors);
     }
 
+    _attributeListComplete = false;
+
     // If we encountered any errors while trying to create return list
     // of all errors. That is we collect all errors per stage plus any
     // errors during linking and throw one exception for them all so that
@@ -326,7 +325,7 @@ bool MslProgram::bind(id<MTLRenderCommandEncoder> renderCmdEncoder)
 
 void MslProgram::prepareUsedResources(id<MTLRenderCommandEncoder> renderCmdEncoder,
                                       CameraPtr cam,
-                                      GeometryHandlerPtr geometryHandler,
+                                      GeometryHandlerPtr /*geometryHandler*/,
                                       ImageHandlerPtr imageHandler,
                                       LightHandlerPtr lightHandler)
 {
@@ -345,7 +344,6 @@ void MslProgram::prepareUsedResources(id<MTLRenderCommandEncoder> renderCmdEncod
 
     // Bind based on inputs found
     bindViewInformation(cam);
-    bindTimeAndFrame();
     bindLighting(lightHandler, imageHandler);
     bindTextures(renderCmdEncoder, lightHandler, imageHandler);
     bindUniformBuffers(renderCmdEncoder, lightHandler, cam);
@@ -689,8 +687,8 @@ void MslProgram::bindLighting(LightHandlerPtr lightHandler, ImageHandlerPtr imag
 
     // Set the number of active light sources
     size_t lightCount = lightHandler->getLightSources().size();
-    auto input = uniformList.find(HW::NUM_ACTIVE_LIGHT_SOURCES);
-    if (input == uniformList.end())
+    auto numActiveLightSourcesInput = uniformList.find(HW::NUM_ACTIVE_LIGHT_SOURCES);
+    if (numActiveLightSourcesInput == uniformList.end())
     {
         // No lighting information so nothing further to do
         lightCount = 0;
@@ -743,12 +741,13 @@ void MslProgram::bindLighting(LightHandlerPtr lightHandler, ImageHandlerPtr imag
             }
         }
     }
+    bindUniform(HW::REFRACTION_TWO_SIDED, Value::createValue(lightHandler->getRefractionTwoSided()), false);
 
     // Bind direct lighting properties.
     if (hasUniform(HW::NUM_ACTIVE_LIGHT_SOURCES))
     {
-        int lightCount = lightHandler->getDirectLighting() ? (int) lightHandler->getLightSources().size() : 0;
-        bindUniform(HW::NUM_ACTIVE_LIGHT_SOURCES, Value::createValue(lightCount));
+        lightCount = lightHandler->getDirectLighting() ? lightCount : 0;
+        bindUniform(HW::NUM_ACTIVE_LIGHT_SOURCES, Value::createValue(static_cast<int>(lightCount)));
         LightIdMap idMap = lightHandler->computeLightIdMap(lightHandler->getLightSources());
         size_t index = 0;
         for (NodePtr light : lightHandler->getLightSources())
@@ -1094,17 +1093,16 @@ const MslProgram::InputMap& MslProgram::updateUniformsList()
                         }
                         else
                         {
-                            auto structTypeDesc = StructTypeDesc::get(variableTypeDesc.getStructIndex());
                             auto aggregateValue = std::static_pointer_cast<const AggregateValue>(variableValue);
 
-                            const auto& members = structTypeDesc.getMembers();
-                            for (size_t i = 0, n = members.size(); i < n; ++i)
+                            const auto& members = variableTypeDesc.getStructMembers();
+                            for (size_t i = 0, n = members->size(); i < n; ++i)
                             {
-                                const auto& structMember = members[i];
-                                auto memberVariableName = variableName+"."+structMember._name;
+                                const auto& structMember = (*members)[i];
+                                auto memberVariableName = variableName + "." + structMember.getName();
                                 auto memberVariableValue = aggregateValue->getMemberValue(i);
 
-                                populateUniformInput_ref(structMember._typeDesc, memberVariableName, memberVariableValue, populateUniformInput_ref);
+                                populateUniformInput_ref(structMember.getType(), memberVariableName, memberVariableValue, populateUniformInput_ref);
                             }
                         }
                     };
@@ -1519,6 +1517,11 @@ const MslProgram::InputMap& MslProgram::updateAttributesList()
         throw ExceptionRenderError(errorType, errors);
     }
 
+    if (_attributeListComplete)
+    {
+        return _attributeList;
+    }
+
     if (_shader)
     {
         const ShaderStage& vs = _shader->getStage(Stage::VERTEX);
@@ -1559,6 +1562,8 @@ const MslProgram::InputMap& MslProgram::updateAttributesList()
                 }
             }
         }
+
+        _attributeListComplete = true;
 
         // Throw an error if any type mismatches were found
         if (uniformTypeMismatchFound)

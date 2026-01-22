@@ -9,11 +9,23 @@
 
 MATERIALX_NAMESPACE_BEGIN
 
-const Edge NULL_EDGE(nullptr, nullptr, nullptr);
+const Edge& getNullEdge() {
+    static const auto ret = new Edge(nullptr, nullptr, nullptr);
+    return *ret;
+}
 
-const TreeIterator NULL_TREE_ITERATOR(nullptr);
-const GraphIterator NULL_GRAPH_ITERATOR(nullptr);
-const InheritanceIterator NULL_INHERITANCE_ITERATOR(nullptr);
+const TreeIterator& getNullTreeIterator() {
+    static const auto ret = new TreeIterator(nullptr);
+    return *ret;
+}
+const GraphIterator& getNullGraphIterator() {
+    static const auto ret = new GraphIterator(nullptr);
+    return *ret;
+}
+const InheritanceIterator& getNullInheritanceIterator() {
+    static const auto ret = new InheritanceIterator(nullptr);
+    return *ret;
+}
 
 //
 // Edge methods
@@ -21,7 +33,7 @@ const InheritanceIterator NULL_INHERITANCE_ITERATOR(nullptr);
 
 Edge::operator bool() const
 {
-    return *this != NULL_EDGE;
+    return *this != getNullEdge();
 }
 
 string Edge::getName() const
@@ -35,7 +47,7 @@ string Edge::getName() const
 
 const TreeIterator& TreeIterator::end()
 {
-    return NULL_TREE_ITERATOR;
+    return getNullTreeIterator();
 }
 
 TreeIterator& TreeIterator::operator++()
@@ -66,7 +78,7 @@ TreeIterator& TreeIterator::operator++()
 
         // Traverse to our siblings.
         StackFrame& parentFrame = _stack.back();
-        const vector<ElementPtr>& siblings = parentFrame.first->getChildren();
+        const ElementVec& siblings = parentFrame.first->getChildren();
         if (parentFrame.second + 1 < siblings.size())
         {
             _elem = siblings[++parentFrame.second];
@@ -97,7 +109,7 @@ size_t GraphIterator::getNodeDepth() const
 
 const GraphIterator& GraphIterator::end()
 {
-    return NULL_GRAPH_ITERATOR;
+    return getNullGraphIterator();
 }
 
 GraphIterator& GraphIterator::operator++()
@@ -113,7 +125,7 @@ GraphIterator& GraphIterator::operator++()
         // Traverse to the first upstream edge of this element.
         _stack.emplace_back(_upstreamElem, 0);
         Edge nextEdge = _upstreamElem->getUpstreamEdge(0);
-        if (nextEdge && nextEdge.getUpstreamElement())
+        if (nextEdge && nextEdge.getUpstreamElement() && !skipOrMarkAsVisited(nextEdge))
         {
             extendPathUpstream(nextEdge.getUpstreamElement(), nextEdge.getConnectingElement());
             return *this;
@@ -140,7 +152,7 @@ GraphIterator& GraphIterator::operator++()
         if (parentFrame.second + 1 < parentFrame.first->getUpstreamEdgeCount())
         {
             Edge nextEdge = parentFrame.first->getUpstreamEdge(++parentFrame.second);
-            if (nextEdge && nextEdge.getUpstreamElement())
+            if (nextEdge && nextEdge.getUpstreamElement() && !skipOrMarkAsVisited(nextEdge))
             {
                 extendPathUpstream(nextEdge.getUpstreamElement(), nextEdge.getConnectingElement());
                 return *this;
@@ -177,13 +189,19 @@ void GraphIterator::returnPathDownstream(ElementPtr upstreamElem)
     _connectingElem = ElementPtr();
 }
 
+bool GraphIterator::skipOrMarkAsVisited(const Edge& edge)
+{
+    auto [it, inserted] = _visitedEdges.emplace(edge);
+    return !inserted;
+}
+
 //
 // InheritanceIterator methods
 //
 
 const InheritanceIterator& InheritanceIterator::end()
 {
-    return NULL_INHERITANCE_ITERATOR;
+    return getNullInheritanceIterator();
 }
 
 InheritanceIterator& InheritanceIterator::operator++()

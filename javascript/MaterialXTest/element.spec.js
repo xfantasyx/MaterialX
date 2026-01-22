@@ -31,6 +31,13 @@ describe('Element', () =>
         };
     });
 
+    after(() =>
+    {
+        // Cleanup typed helper objects and document
+        Object.values(valueTypes).forEach(v => v.delete());
+        doc.delete();
+    });
+
     describe('value setters', () =>
     {
         const checkValue = (types, assertionCallback) =>
@@ -42,6 +49,7 @@ describe('Element', () =>
                 elem[setFn](types[typeName]);
                 assertionCallback(elem.getValue().getData(), typeName);
             });
+            elem.delete();
         };
 
         it('should work with expected type', () =>
@@ -80,6 +88,7 @@ describe('Element', () =>
                 elem[setFn](typeName, types[typeName]);
                 assertionCallback(elem[getFn](typeName), types[typeName]);
             });
+            elem.delete();
         };
 
         it('should work with expected custom type', () =>
@@ -162,5 +171,31 @@ describe('Element', () =>
             expect(doc[specializedFn]()).to.be.an.instanceof(specialElemType[typeName]);
             expect(doc.addChildOfCategory(factoryName)).to.be.an.instanceof(specialElemType[typeName]);
         });
+        // No doc.delete() here; cleaned up in after()
+    });
+});
+
+describe('Equivalence', () =>
+{
+    let mx, doc, doc2
+
+    before(async () => {
+        mx = await Module();
+        doc = mx.createDocument();
+        doc.addNodeGraph("graph");
+        doc2 = mx.createDocument();
+        doc2.addNodeGraph("graph1");
+    });
+
+    it('Compare document equivalency', () =>
+    {
+        let options = new mx.ElementEquivalenceOptions();
+        let differences = {};
+        options.performValueComparisons = false;
+        let result = doc.isEquivalent(doc2, options, differences);
+        expect(result).to.be.false;
+        expect(differences.message).to.not.be.empty;
+        result = doc.isEquivalent(doc2, options, undefined);
+        expect(result).to.be.false;
     });
 });

@@ -14,6 +14,7 @@
 #include <MaterialXRender/LightHandler.h>
 #include <MaterialXRender/ImageHandler.h>
 #include <MaterialXRender/Image.h>
+#include <MaterialXRender/Timer.h>
 
 #include <MaterialXCore/Value.h>
 #include <MaterialXCore/Unit.h>
@@ -37,7 +38,8 @@ class RenderPipeline
 {
   public:
     RenderPipeline() = delete;
-    RenderPipeline(Viewer* viewer)
+    RenderPipeline(Viewer* viewer) :
+        _frame(0)
     {
         _viewer = viewer;
     }
@@ -68,5 +70,7 @@ class RenderPipeline
 
   public:
     Viewer* _viewer;
+    mx::ScopedTimer _timer;
+    unsigned int _frame;
 };
 #endif // RENDER_PIPELINE_H

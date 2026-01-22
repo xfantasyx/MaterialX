@@ -11,13 +11,7 @@ if(APPLE)
         find_package(OpenGL REQUIRED)
     endif()
 elseif(UNIX)
-    find_package(X11 REQUIRED)
-    # Note - can't just require the Xt component because FindX11 in cmake 3.1
-    # doesn't support it
-    if(NOT X11_Xt_FOUND)
-        message(FATAL_ERROR "Error in building MaterialXRenderMsl: Xt was not found")
-    endif()
-
+    find_package(X11 REQUIRED COMPONENTS Xt)
     find_package(OpenGL REQUIRED)
 endif()
 
@@ -40,7 +34,7 @@ elseif(UNIX)
     target_include_directories(${TARGET_NAME} PRIVATE ${X11_INCLUDE_DIR})
 endif()
 
-# Disable OpenGL deprecation warnings on Clang.
+# Disable deprecation warnings on Clang.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(${TARGET_NAME} PRIVATE -Wno-deprecated-declarations)
 endif()

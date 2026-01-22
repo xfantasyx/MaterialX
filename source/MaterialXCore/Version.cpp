@@ -139,7 +139,7 @@ void Document::upgradeVersion()
         // Upgrade elements in place.
         for (ElementPtr elem : traverseTree())
         {
-            vector<ElementPtr> origChildren = elem->getChildren();
+            ElementVec origChildren = elem->getChildren();
             for (ElementPtr child : origChildren)
             {
                 if (child->getCategory() == "opgraph")
@@ -215,7 +215,7 @@ void Document::upgradeVersion()
         }
 
         // Move connections from nodedef inputs to bindinputs.
-        vector<ElementPtr> materials = getChildrenOfType<Element>("material");
+        ElementVec materials = getChildrenOfType<Element>("material");
         for (NodeDefPtr nodeDef : getNodeDefs())
         {
             for (InputPtr input : nodeDef->getActiveInputs())
@@ -328,7 +328,7 @@ void Document::upgradeVersion()
                 elem->setAttribute(ValueElement::VALUE_ATTRIBUTE, replaceSubstrings(elem->getAttribute(ValueElement::VALUE_ATTRIBUTE), stringMap));
             }
 
-            vector<ElementPtr> origChildren = elem->getChildren();
+            ElementVec origChildren = elem->getChildren();
             for (ElementPtr child : origChildren)
             {
                 if (elem->getCategory() == "material" && child->getCategory() == "override")
@@ -500,7 +500,7 @@ void Document::upgradeVersion()
                 }
             }
 
-            // Change nodes with category "tranform[vector|point|normal]",
+            // Change nodes with category "transform[vector|point|normal]",
             // which are not fromspace/tospace variants, to "transformmatrix"
             else if (nodeCategory == "transformpoint" ||
                      nodeCategory == "transformvector" ||
@@ -1166,20 +1166,19 @@ void Document::upgradeVersion()
             else if (nodeCategory == "swizzle")
             {
                 InputPtr inInput = node->getInput("in");
-                InputPtr channelsInput = node->getInput("channels");
-                if (inInput &&
-                    CHANNEL_COUNT_MAP.count(inInput->getType()) &&
+                const string sourceType = inInput ? inInput->getType() : "float";
+                if (CHANNEL_COUNT_MAP.count(sourceType) &&
                     CHANNEL_COUNT_MAP.count(node->getType()))
                 {
+                    InputPtr channelsInput = node->getInput("channels");
                     string channelString = channelsInput ? channelsInput->getValueString() : EMPTY_STRING;
-                    string sourceType = inInput->getType();
                     string destType = node->getType();
                     size_t sourceChannelCount = CHANNEL_COUNT_MAP.at(sourceType);
                     size_t destChannelCount = CHANNEL_COUNT_MAP.at(destType);
 
                     // Resolve the invalid case of having both a connection and a value
                     // by removing the value attribute.
-                    if (inInput->hasValue())
+                    if (inInput && inInput->hasValue())
                     {
                         if (inInput->hasNodeName() || inInput->hasNodeGraphString() || inInput->hasInterfaceName())
                         {
@@ -1187,11 +1186,40 @@ void Document::upgradeVersion()
                         }
                     }
 
-                    if (inInput->hasValue())
+                    // We convert to a constant node if "in" input is a constant value or does not exist:
+                    bool convertToConstantNode = !inInput || inInput->hasValue();
+                    // We also convert to a constant node if every destination
+                    // channel is constant:
+                    //   eg: "ND_swizzle_color3_color3" node with
+                    //       "010" in the "channels" input.
+                    if (!convertToConstantNode)
+                    {
+                        convertToConstantNode = true;
+                        for (size_t i = 0; i < destChannelCount; i++)
+                        {
+                            if (i < channelString.size())
+                            {
+                                if (CHANNEL_CONSTANT_MAP.count(channelString[i]))
+                                {
+                                    // Still in constant territory:
+                                    continue;
+                                }
+                            }
+                            // Every other scenario: not constant
+                            convertToConstantNode = false;
+                            break;
+                        }
+                    }
+
+                    if (convertToConstantNode)
                     {
                         // Replace swizzle with constant.
                         node->setCategory("constant");
-                        string valueString = inInput->getValueString();
+                        if (node->hasNodeDefString())
+                        {
+                            node->setNodeDefString("ND_constant_" + node->getType());
+                        }
+                        string valueString = inInput ? inInput->getValueString() : "0";
                         StringVec origValueTokens = splitString(valueString, ARRAY_VALID_SEPARATORS);
                         StringVec newValueTokens;
                         for (size_t i = 0; i < destChannelCount; i++)
@@ -1204,30 +1232,34 @@ void Document::upgradeVersion()
                                     if (index < origValueTokens.size())
                                     {
                                         newValueTokens.push_back(origValueTokens[index]);
+                                        continue;
                                     }
                                 }
                                 else if (CHANNEL_CONSTANT_MAP.count(channelString[i]))
                                 {
                                     newValueTokens.push_back(std::to_string(CHANNEL_CONSTANT_MAP.at(channelString[i])));
-                                }
-                                else
-                                {
-                                    newValueTokens.push_back(origValueTokens[0]);
+                                    continue;
                                 }
                             }
-                            else
-                            {
-                                newValueTokens.push_back(origValueTokens[0]);
-                            }
+                            // Invalid channel name, or missing channel name:
+                            newValueTokens.push_back(origValueTokens[0]);
                         }
                         InputPtr valueInput = node->addInput("value", node->getType());
                         valueInput->setValueString(joinStrings(newValueTokens, ", "));
-                        node->removeInput(inInput->getName());
+                        // This is the last place we need to check for nullptr for inInput.
+                        if (inInput)
+                        {
+                            node->removeInput(inInput->getName());
+                        }
                     }
                     else if (destChannelCount == 1)
                     {
                         // Replace swizzle with extract.
                         node->setCategory("extract");
+                        if (node->hasNodeDefString())
+                        {
+                            node->setNodeDefString("ND_extract_" + sourceType);
+                        }
                         if (!channelString.empty() && CHANNEL_INDEX_MAP.count(channelString[0]))
                         {
                             node->setInputValue("index", (int) CHANNEL_INDEX_MAP.at(channelString[0]));
@@ -1238,11 +1270,19 @@ void Document::upgradeVersion()
                     {
                         // Replace swizzle with convert.
                         node->setCategory("convert");
+                        if (node->hasNodeDefString())
+                        {
+                            node->setNodeDefString("ND_convert_" + sourceType + "_" + destType);
+                        }
                     }
                     else if (sourceChannelCount == 1)
                     {
                         // Replace swizzle with combine.
                         node->setCategory("combine" + std::to_string(destChannelCount));
+                        if (node->hasNodeDefString())
+                        {
+                            node->setNodeDefString("ND_combine" + std::to_string(destChannelCount) + "_" + node->getType());
+                        }
                         for (size_t i = 0; i < destChannelCount; i++)
                         {
                             InputPtr combineInInput = node->addInput(std::string("in") + std::to_string(i + 1), "float");
@@ -1269,6 +1309,10 @@ void Document::upgradeVersion()
                             graph->setChildIndex(separateNode->getName(), childIndex);
                         }
                         node->setCategory("combine" + std::to_string(destChannelCount));
+                        if (node->hasNodeDefString())
+                        {
+                            node->setNodeDefString("ND_combine" + std::to_string(destChannelCount) + "_" + node->getType());
+                        }
                         for (size_t i = 0; i < destChannelCount; i++)
                         {
                             InputPtr combineInInput = node->addInput(std::string("in") + std::to_string(i + 1), "float");
@@ -1278,17 +1322,17 @@ void Document::upgradeVersion()
                                 {
                                     combineInInput->setConnectedNode(separateNode);
                                     combineInInput->setOutputString(std::string("out") + channelString[i]);
+                                    continue;
                                 }
                                 else if (CHANNEL_CONSTANT_MAP.count(channelString[i]))
                                 {
                                     combineInInput->setValue(CHANNEL_CONSTANT_MAP.at(channelString[i]));
+                                    continue;
                                 }
                             }
-                            else
-                            {
-                                combineInInput->setConnectedNode(separateNode);
-                                combineInInput->setOutputString(combineInInput->isColorType() ? "outr" : "outx");
-                            }
+                            // Invalid channel name, or missing channel name:
+                            combineInInput->setConnectedNode(separateNode);
+                            combineInInput->setOutputString(inInput->isColorType() ? "outr" : "outx");
                         }
                         copyInputWithBindings(node, inInput->getName(), separateNode, "in");
                         node->removeInput(inInput->getName());
@@ -1316,31 +1360,59 @@ void Document::upgradeVersion()
             }
             else if (nodeCategory == "normalmap")
             {
-                // ND_normalmap was renamed to ND_normalmap_float
-                NodeDefPtr nodeDef = getShaderNodeDef(node);
-                InputPtr scaleInput = node->getInput("scale");
-                if ((nodeDef && nodeDef->getName() == "ND_normalmap") ||
-                    (scaleInput && scaleInput->getType() == "float"))
+                InputPtr space = node->getInput("space");
+                if (space && space->getValueString() == "object")
                 {
-                    node->setNodeDefString("ND_normalmap_float");
-                }
-
-                node->removeInput("space");
-
-                // If the normal or tangent inputs are set, the bitangent input should be normalize(cross(N, T))
-                InputPtr normalInput = node->getInput("normal");
-                InputPtr tangentInput = node->getInput("tangent");
-                if (normalInput || tangentInput)
-                {
+                    // Replace object-space normalmap with a graph.
                     GraphElementPtr graph = node->getAncestorOfType<GraphElement>();
-                    NodePtr crossNode = graph->addNode("crossproduct", graph->createValidChildName("normalmap_cross"), "vector3");
-                    copyInputWithBindings(node, "normal", crossNode, "in1");
-                    copyInputWithBindings(node, "tangent", crossNode, "in2");
+                    NodePtr multiply = graph->addNode("multiply", graph->createValidChildName("multiply"), "vector3");
+                    copyInputWithBindings(node, "in", multiply, "in1");
+                    multiply->setInputValue("in2", 2.0f);
+                    NodePtr subtract = graph->addNode("subtract", graph->createValidChildName("subtract"), "vector3");
+                    subtract->addInput("in1", "vector3")->setConnectedNode(multiply);
+                    subtract->setInputValue("in2", 1.0f);
+                    node->setCategory("normalize");
+                    vector<InputPtr> origInputs = node->getInputs();
+                    for (InputPtr input : origInputs)
+                    {
+                        node->removeChild(input->getName());
+                    }
+                    node->addInput("in", "vector3")->setConnectedNode(subtract);
 
-                    NodePtr normalizeNode = graph->addNode("normalize", graph->createValidChildName("normalmap_cross_norm"), "vector3");
-                    normalizeNode->addInput("in", "vector3")->setConnectedNode(crossNode);
+                    // Update nodedef name if present.
+                    if (node->hasNodeDefString())
+                    {
+                        node->setNodeDefString("ND_normalize_vector3");
+                    }
+                }
+                else
+                {
+                    // Clear tangent-space input.
+                    node->removeInput("space");
 
-                    node->addInput("bitangent", "vector3")->setConnectedNode(normalizeNode);
+                    // If the normal or tangent inputs are set and the bitangent input is not, 
+                    // the bitangent should be set to normalize(cross(N, T))
+                    InputPtr normalInput = node->getInput("normal");
+                    InputPtr tangentInput = node->getInput("tangent");
+                    InputPtr bitangentInput = node->getInput("bitangent");
+                    if ((normalInput || tangentInput) && !bitangentInput)
+                    {
+                        GraphElementPtr graph = node->getAncestorOfType<GraphElement>();
+                        NodePtr crossNode = graph->addNode("crossproduct", graph->createValidChildName("normalmap_cross"), "vector3");
+                        copyInputWithBindings(node, "normal", crossNode, "in1");
+                        copyInputWithBindings(node, "tangent", crossNode, "in2");
+
+                        NodePtr normalizeNode = graph->addNode("normalize", graph->createValidChildName("normalmap_cross_norm"), "vector3");
+                        normalizeNode->addInput("in", "vector3")->setConnectedNode(crossNode);
+
+                        node->addInput("bitangent", "vector3")->setConnectedNode(normalizeNode);
+                    }
+
+                    // Update nodedef name if present.
+                    if (node->getNodeDefString() == "ND_normalmap")
+                    {
+                        node->setNodeDefString("ND_normalmap_float");
+                    }
                 }
             }
         }

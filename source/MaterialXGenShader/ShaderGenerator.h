@@ -12,13 +12,13 @@
 #include <MaterialXGenShader/Export.h>
 
 #include <MaterialXGenShader/ColorManagementSystem.h>
+#include <MaterialXGenShader/Exception.h>
 #include <MaterialXGenShader/Factory.h>
 #include <MaterialXGenShader/ShaderStage.h>
 #include <MaterialXGenShader/Syntax.h>
 
 #include <MaterialXFormat/File.h>
 
-#include <MaterialXCore/Exception.h>
 
 MATERIALX_NAMESPACE_BEGIN
 
@@ -88,6 +88,9 @@ class MX_GENSHADER_API ShaderGenerator
     /// Add the function definition for a single node.
     virtual void emitFunctionDefinition(const ShaderNode& node, GenContext& context, ShaderStage& stage) const;
 
+    // Emit the connected variable name for an input and output in a function definition (Used by CompoundNode)
+    virtual void emitFunctionDefinitionParameter(const ShaderPort* shaderPort, bool isOutput, GenContext& context, ShaderStage& stage) const;
+
     /// Add all function definitions for a graph.
     virtual void emitFunctionDefinitions(const ShaderGraph& graph, GenContext& context, ShaderStage& stage) const;
 
@@ -140,8 +143,16 @@ class MX_GENSHADER_API ShaderGenerator
     virtual void emitVariableDeclaration(const ShaderPort* variable, const string& qualifier, GenContext& context, ShaderStage& stage,
                                          bool assignValue = true) const;
 
-    /// Return the closure contexts defined for the given node.
-    virtual void getClosureContexts(const ShaderNode& node, vector<ClosureContext*>& cct) const;
+    /// Return true if the node needs the additional ClosureData added
+    virtual bool nodeNeedsClosureData(const ShaderNode& /*node*/) const { return false; }
+
+    /// Emit the closure data argument if required
+    /// Note this is an affordance for HwShaderGenerator
+    virtual void emitClosureDataArg(const ShaderNode& /*node*/, GenContext& /*context*/, ShaderStage& /*stage*/) const {}
+
+    /// Emit the closure data parameter if required.
+    /// Note this is an affordance for HwShaderGenerator
+    virtual void emitClosureDataParameter(const ShaderNode& /*node*/, GenContext& /*context*/, ShaderStage& /*stage*/) const {}
 
     /// Return the result of an upstream connection or value for an input.
     virtual string getUpstreamResult(const ShaderInput* input, GenContext& context) const;
@@ -157,6 +168,12 @@ class MX_GENSHADER_API ShaderGenerator
 
     /// Determine if a shader node implementation has been registered for a given implementation element name
     bool implementationRegistered(const string& name) const;
+
+    /// Create the shader node implementation for a NodeGraph implementation.
+    virtual ShaderNodeImplPtr createShaderNodeImplForNodeGraph(const NodeGraph& nodegraph) const;
+
+    /// Create the shader node implementation for an Implementation implementation.
+    virtual ShaderNodeImplPtr createShaderNodeImplForImplementation(const Implementation& implementation) const;
 
     /// Return a registered shader node implementation for the given nodedef.
     virtual ShaderNodeImplPtr getImplementation(const NodeDef& nodedef, GenContext& context) const;
@@ -185,17 +202,20 @@ class MX_GENSHADER_API ShaderGenerator
         return _unitSystem;
     }
 
+    /// Returns the type system
+    TypeSystemPtr getTypeSystem() const
+    {
+        return _typeSystem;
+    }
+
     /// Return the map of token substitutions used by the generator.
     const StringMap& getTokenSubstitutions() const
     {
         return _tokenSubstitutions;
     }
 
-    /// Load any struct type definitions from the document in to the type cache.
-    void loadStructTypeDefs(const DocumentPtr& doc);
-
-    /// Clear any struct type definitions loaded
-    void clearStructTypeDefs();
+    /// Register type definitions from the document.
+    virtual void registerTypeDefs(const DocumentPtr& doc);
 
     /// Register metadata that should be exported to the generated shaders.
     /// Supported metadata includes standard UI attributes like "uiname", "uifolder",
@@ -208,9 +228,12 @@ class MX_GENSHADER_API ShaderGenerator
     /// export of metadata.
     virtual void registerShaderMetadata(const DocumentPtr& doc, GenContext& context) const;
 
+    // Retrieve the string used for the LightData.type member variable
+    virtual const string& getLightDataTypevarString() const { return LIGHTDATA_TYPEVAR_STRING; }
+
   protected:
     /// Protected constructor
-    ShaderGenerator(SyntaxPtr syntax);
+    ShaderGenerator(TypeSystemPtr typeSystem, SyntaxPtr syntax);
 
     /// Create a new stage in a shader.
     virtual ShaderStagePtr createStage(const string& name, Shader& shader) const;
@@ -230,7 +253,9 @@ class MX_GENSHADER_API ShaderGenerator
 
   protected:
     static const string T_FILE_TRANSFORM_UV;
+    static const string LIGHTDATA_TYPEVAR_STRING;
 
+    TypeSystemPtr _typeSystem;
     SyntaxPtr _syntax;
     Factory<ShaderNodeImpl> _implFactory;
     ColorManagementSystemPtr _colorManagementSystem;
@@ -238,14 +263,6 @@ class MX_GENSHADER_API ShaderGenerator
     mutable StringMap _tokenSubstitutions;
 
     friend ShaderGraph;
-};
-
-/// @class ExceptionShaderGenError
-/// An exception that is thrown when shader generation fails.
-class MX_GENSHADER_API ExceptionShaderGenError : public Exception
-{
-  public:
-    using Exception::Exception;
 };
 
 MATERIALX_NAMESPACE_END

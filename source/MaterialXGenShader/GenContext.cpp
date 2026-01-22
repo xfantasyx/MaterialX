@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <MaterialXGenShader/Exception.h>
 #include <MaterialXGenShader/GenContext.h>
-#include <MaterialXGenShader/ShaderGenerator.h>
 
 MATERIALX_NAMESPACE_BEGIN
 
@@ -53,7 +53,7 @@ ShaderNodeImplPtr GenContext::findNodeImplementation(const string& name) const
 
 void GenContext::getNodeImplementationNames(StringSet& names)
 {
-    for (auto it : _nodeImpls)
+    for (const auto& it : _nodeImpls)
     {
         names.insert(it.first);
     }
@@ -106,44 +106,6 @@ void GenContext::getOutputSuffix(const ShaderOutput* output, string& suffix) con
     if (iter != _outputSuffix.end())
     {
         suffix = iter->second;
-    }
-}
-
-ScopedSetClosureParams::ScopedSetClosureParams(const ClosureContext::ClosureParams* params, const ShaderNode* node, ClosureContext* cct) :
-    _cct(cct),
-    _node(node),
-    _oldParams(nullptr)
-{
-    if (_cct)
-    {
-        _oldParams = _cct->getClosureParams(_node);
-        _cct->setClosureParams(_node, params);
-    }
-}
-
-ScopedSetClosureParams::ScopedSetClosureParams(const ShaderNode* fromNode, const ShaderNode* toNode, ClosureContext* cct) :
-    _cct(cct),
-    _node(toNode),
-    _oldParams(nullptr)
-{
-    // The class must be safe for the cases where a context is not set
-    // so make sure to check for nullptr here.
-    if (_cct)
-    {
-        const ClosureContext::ClosureParams* newParams = _cct->getClosureParams(fromNode);
-        if (newParams)
-        {
-            _oldParams = _cct->getClosureParams(_node);
-            _cct->setClosureParams(_node, newParams);
-        }
-    }
-}
-
-ScopedSetClosureParams::~ScopedSetClosureParams()
-{
-    if (_cct)
-    {
-        _cct->setClosureParams(_node, _oldParams);
     }
 }
 

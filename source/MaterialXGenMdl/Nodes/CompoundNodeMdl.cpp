@@ -5,8 +5,8 @@
 
 #include <MaterialXGenMdl/Nodes/CompoundNodeMdl.h>
 #include <MaterialXGenMdl/MdlShaderGenerator.h>
+#include <MaterialXGenMdl/MdlSyntax.h>
 
-#include <MaterialXGenShader/HwShaderGenerator.h>
 #include <MaterialXGenShader/ShaderGenerator.h>
 #include <MaterialXGenShader/Util.h>
 
@@ -46,6 +46,7 @@ void CompoundNodeMdl::emitFunctionDefinition(const ShaderNode& node, GenContext&
     DEFINE_SHADER_STAGE(stage, Stage::PIXEL)
     {
         const ShaderGenerator& shadergen = context.getShaderGenerator();
+        const MdlSyntax& syntax = static_cast<const MdlSyntax&>(shadergen.getSyntax());
 
         const bool isMaterialExpr = (_rootGraph->hasClassification(ShaderNode::Classification::CLOSURE) ||
                                      _rootGraph->hasClassification(ShaderNode::Classification::SHADER));
@@ -56,7 +57,7 @@ void CompoundNodeMdl::emitFunctionDefinition(const ShaderNode& node, GenContext&
         // Emit function signature.
         emitFunctionSignature(node, context, stage);
 
-        // Special case for material expresions.
+        // Special case for material expressions.
         if (isMaterialExpr)
         {
             shadergen.emitLine(" = let", stage, false);
@@ -83,7 +84,7 @@ void CompoundNodeMdl::emitFunctionDefinition(const ShaderNode& node, GenContext&
                 for (const ShaderGraphOutputSocket* output : _rootGraph->getOutputSockets())
                 {
                     const string result = shadergen.getUpstreamResult(output, context);
-                    shadergen.emitLine(resultVariableName + ".mxp_" + output->getName() + " = " + result, stage);
+                    shadergen.emitLine(resultVariableName + "." + syntax.modifyPortName(output->getName()) + " = " + result, stage);
                 }
                 shadergen.emitLine("return " + resultVariableName, stage);
             }
@@ -180,7 +181,7 @@ void CompoundNodeMdl::emitFunctionCall(const ShaderNode& node, GenContext& conte
 void CompoundNodeMdl::emitFunctionSignature(const ShaderNode&, GenContext& context, ShaderStage& stage) const
 {
     const ShaderGenerator& shadergen = context.getShaderGenerator();
-    const Syntax& syntax = shadergen.getSyntax();
+    const MdlSyntax& syntax = static_cast<const MdlSyntax&>(shadergen.getSyntax());
 
     if (!_returnStruct.empty())
     {
@@ -208,7 +209,7 @@ void CompoundNodeMdl::emitFunctionSignature(const ShaderNode&, GenContext& conte
             shadergen.emitScopeBegin(stage, Syntax::CURLY_BRACKETS);
             for (const ShaderGraphOutputSocket* output : _rootGraph->getOutputSockets())
             {
-                shadergen.emitLine(syntax.getTypeName(output->getType()) + " mxp_" + output->getName(), stage);
+                shadergen.emitLine(syntax.getTypeName(output->getType()) + " " + syntax.modifyPortName(output->getName()), stage);
             }
             shadergen.emitScopeEnd(stage, true);
             shadergen.emitLineBreak(stage);
@@ -252,7 +253,22 @@ void CompoundNodeMdl::emitFunctionSignature(const ShaderNode&, GenContext& conte
         }
 
         const string& delim = --count > 0 ? Syntax::COMMA : EMPTY_STRING;
-        shadergen.emitLine(qualifier + type + " " + input->getVariable() + " = " + value + delim, stage, false);
+        shadergen.emitLineBegin(stage);
+        shadergen.emitString(qualifier + type + " " + input->getVariable() + " = " + value, stage);
+
+        if (input->getConnections().empty())
+        {
+            shadergen.emitLineEnd(stage, false);
+            shadergen.emitLine("[[", stage, false);
+            shadergen.emitLineBegin(stage);
+            shadergen.emitString(syntax.getIndentation() + "anno::unused()", stage);
+            shadergen.emitLineEnd(stage, false);
+            shadergen.emitLineBegin(stage);
+            shadergen.emitString("]]", stage);
+        }
+
+        shadergen.emitString(delim, stage);
+        shadergen.emitLineEnd(stage, false);
     }
 
     // End function signature.

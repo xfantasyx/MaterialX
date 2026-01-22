@@ -1,4 +1,4 @@
-option(MATERIALX_NANOGUI_EXTERNAL "Build aginst an external install of NanoGUI (NANOGUI_ROOT may also need to be set)" OFF)
+option(MATERIALX_NANOGUI_EXTERNAL "Build against an external install of NanoGUI (NANOGUI_ROOT may also need to be set)" OFF)
 
 set(MATERIALXVIEW_RENDER_BACKEND_DEFINITIONS "")
 
@@ -11,7 +11,12 @@ if(APPLE)
       set(USE_OPENGL_BACKEND_ON_APPLE_PLATFORM ON)
     endif()
     
-    if(USE_OPENGL_BACKEND_ON_APPLE_PLATFORM)
+    # Force Metal backend if MSL-only rendering is enabled
+    if(MATERIALX_RENDER_MSL_ONLY)
+        set(USE_OPENGL_BACKEND_ON_APPLE_PLATFORM OFF)
+        set(NANOGUI_PREFERRED_BACKEND Metal)
+        set(MATERIALXVIEW_RENDER_BACKEND_DEFINITIONS "-DMATERIALXVIEW_METAL_BACKEND=1")
+    elseif(USE_OPENGL_BACKEND_ON_APPLE_PLATFORM)
         set(NANOGUI_PREFERRED_BACKEND OpenGL)
 	set(MATERIALXVIEW_RENDER_BACKEND_DEFINITIONS "-DMATERIALXVIEW_OPENGL_BACKEND=1")
     else()
@@ -66,9 +71,9 @@ else()
     if(MSVC)
         add_compile_options(-wd4389)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        add_compile_options(-Wno-deprecated)
+        add_compile_options(-Wno-deprecated -Wno-unused-parameter -Wno-shadow)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-        add_compile_options(-Wno-format-truncation -Wno-stringop-overflow -Wno-use-after-free)
+        add_compile_options(-Wno-format-truncation -Wno-stringop-overflow -Wno-use-after-free -Wno-unused-parameter -Wno-shadow)
     endif()
 
     # Disable NanoGUI compiler modifications for Clang
@@ -110,14 +115,8 @@ if("${NANOGUI_PREFERRED_BACKEND}" STREQUAL "Metal")
         MaterialXGenMsl
         MaterialXRenderMsl)
 
-    file(GLOB materialx_source 
-        "${CMAKE_CURRENT_SOURCE_DIR}/Viewer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ViewerMSL.mm"
-        "${CMAKE_CURRENT_SOURCE_DIR}/RenderPipeline.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/RenderPipelineMetal.mm"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Editor.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/MetalState.mm"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Main.cpp")    
+    LIST(REMOVE_ITEM materialx_source "${CMAKE_CURRENT_SOURCE_DIR}/RenderPipelineGL.cpp")
+    LIST(APPEND materialx_source "${CMAKE_CURRENT_SOURCE_DIR}/RenderPipelineMetal.mm")
 endif()
 
 if (MATERIALX_BUILD_GEN_OSL)
@@ -147,6 +146,8 @@ set_target_properties(
 
 install(TARGETS MaterialXView
     EXPORT MaterialX
-    RUNTIME DESTINATION bin)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/MaterialXView.pdb"
-    DESTINATION "bin" OPTIONAL)
+    RUNTIME DESTINATION ${MATERIALX_INSTALL_BIN_PATH})
+if(MSVC)
+    install(FILES $<TARGET_PDB_FILE:MaterialXView>
+            DESTINATION ${MATERIALX_INSTALL_BIN_PATH} OPTIONAL)
+endif()

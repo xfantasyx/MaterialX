@@ -279,7 +279,7 @@ class MX_CORE_API Output : public PortElement
     /// this element in the dataflow graph.
     Edge getUpstreamEdge(size_t index = 0) const override;
 
-    /// Return the number of queriable upstream edges for this element.
+    /// Return the number of queryable upstream edges for this element.
     size_t getUpstreamEdgeCount() const override
     {
         return 1;
@@ -448,7 +448,7 @@ class MX_CORE_API InterfaceElement : public TypedElement
     vector<OutputPtr> getActiveOutputs() const;
 
     /// Set the output to which the given input is connected, creating a
-    /// child input if needed.  If the node argument is null, then any
+    /// child input if needed.  If the output argument is null, then any
     /// existing output connection on the input will be cleared.
     void setConnectedOutput(const string& inputName, OutputPtr output);
 

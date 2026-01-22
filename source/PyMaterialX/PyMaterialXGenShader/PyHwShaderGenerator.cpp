@@ -7,7 +7,7 @@
 
 #include <MaterialXGenShader/GenContext.h>
 #include <MaterialXGenShader/GenUserData.h>
-#include <MaterialXGenShader/HwShaderGenerator.h>
+#include <MaterialXGenHw/HwShaderGenerator.h>
 
 namespace py = pybind11;
 namespace mx = MaterialX;
@@ -25,7 +25,6 @@ void bindPyHwShaderGenerator(py::module& mod)
     mod.attr("HW_ATTR_TRANSPARENT") =  mx::HW::ATTR_TRANSPARENT;
 
     py::class_<mx::HwShaderGenerator, mx::ShaderGenerator, mx::HwShaderGeneratorPtr>(mod, "HwShaderGenerator")
-        .def("getClosureContexts", &mx::HwShaderGenerator::getClosureContexts)
         .def("bindLightShader", &mx::HwShaderGenerator::bindLightShader)
         .def("unbindLightShader", &mx::HwShaderGenerator::unbindLightShader)
         .def("unbindLightShaders", &mx::HwShaderGenerator::unbindLightShaders);

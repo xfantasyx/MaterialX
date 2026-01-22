@@ -11,7 +11,8 @@
 
 #include <MaterialXGenGlsl/Export.h>
 
-#include <MaterialXGenShader/HwShaderGenerator.h>
+#include <MaterialXGenHw/HwResourceBindingContext.h>
+#include <MaterialXGenHw/HwShaderGenerator.h>
 
 MATERIALX_NAMESPACE_BEGIN
 
@@ -22,9 +23,18 @@ using GlslShaderGeneratorPtr = shared_ptr<class GlslShaderGenerator>;
 class MX_GENGLSL_API GlslShaderGenerator : public HwShaderGenerator
 {
   public:
-    GlslShaderGenerator();
+    /// Constructor.
+    GlslShaderGenerator(TypeSystemPtr typeSystem);
 
-    static ShaderGeneratorPtr create() { return std::make_shared<GlslShaderGenerator>(); }
+    /// Creator function.
+    /// If a TypeSystem is not provided it will be created internally.
+    /// Optionally pass in an externally created TypeSystem here, 
+    /// if you want to keep type descriptions alive after the lifetime
+    /// of the shader generator. 
+    static ShaderGeneratorPtr create(TypeSystemPtr typeSystem = nullptr)
+    {
+        return std::make_shared<GlslShaderGenerator>(typeSystem ? typeSystem : TypeSystem::create());
+    }
 
     /// Generate a shader starting from the given element, translating
     /// the element and all dependencies upstream into shader code.
@@ -39,10 +49,6 @@ class MX_GENGLSL_API GlslShaderGenerator : public HwShaderGenerator
     /// Emit a shader variable.
     void emitVariableDeclaration(const ShaderPort* variable, const string& qualifier, GenContext& context, ShaderStage& stage,
                                  bool assignValue = true) const override;
-
-    /// Return a registered shader node implementation given an implementation element.
-    /// The element must be an Implementation or a NodeGraph acting as implementation.
-    ShaderNodeImplPtr getImplementation(const NodeDef& nodedef, GenContext& context) const override;
 
     /// Determine the prefix of vertex data variables.
     string getVertexDataPrefix(const VariableBlock& vertexData) const override;
@@ -67,11 +73,6 @@ class MX_GENGLSL_API GlslShaderGenerator : public HwShaderGenerator
 
     virtual HwResourceBindingContextPtr getResourceBindingContext(GenContext& context) const;
 
-    /// Logic to indicate whether code to support direct lighting should be emitted.
-    /// By default if the graph is classified as a shader, or BSDF node then lighting is assumed to be required.
-    /// Derived classes can override this logic.
-    virtual bool requiresLighting(const ShaderGraph& graph) const;
-
     /// Emit specular environment lookup code
     virtual void emitSpecularEnvironment(GenContext& context, ShaderStage& stage) const;
 
@@ -81,21 +82,8 @@ class MX_GENGLSL_API GlslShaderGenerator : public HwShaderGenerator
     /// Emit function definitions for lighting code
     virtual void emitLightFunctionDefinitions(const ShaderGraph& graph, GenContext& context, ShaderStage& stage) const;
 
-    static void toVec4(TypeDesc type, string& variable);
-    [[deprecated]] static void toVec4(const TypeDesc* type, string& variable) { toVec4(*type, variable); }
-
     /// Nodes used internally for light sampling.
     vector<ShaderNodePtr> _lightSamplingNodes;
-};
-
-/// Base class for common GLSL node implementations
-class MX_GENGLSL_API GlslImplementation : public HwImplementation
-{
-  public:
-    const string& getTarget() const override;
-
-  protected:
-    GlslImplementation() { }
 };
 
 MATERIALX_NAMESPACE_END

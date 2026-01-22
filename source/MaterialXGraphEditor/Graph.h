@@ -20,26 +20,32 @@ namespace mx = MaterialX;
 class MenuItem
 {
   public:
-    MenuItem(const std::string& name, const std::string& type, const std::string& category, const std::string& group) :
-        name(name), type(type), category(category), group(group) { }
+    MenuItem(const std::string& name, const std::string& type, const std::string& category, const std::string& group, const std::set<std::string>& inputTypes, const std::set<std::string>& outputTypes) :
+        name(name), type(type), category(category), group(group), inputTypes(inputTypes), outputTypes(outputTypes) { }
 
     // getters
     std::string getName() const { return name; }
     std::string getType() const { return type; }
     std::string getCategory() const { return category; }
     std::string getGroup() const { return group; }
+    const std::set<std::string>& getInputTypes() const { return inputTypes; }
+    const std::set<std::string>& getOutputTypes() const { return outputTypes; }
 
     // setters
     void setName(const std::string& newName) { this->name = newName; }
     void setType(const std::string& newType) { this->type = newType; }
     void setCategory(const std::string& newCategory) { this->category = newCategory; }
     void setGroup(const std::string& newGroup) { this->group = newGroup; }
+    void setInputTypes(const std::set<std::string>& newInputTypes) { this->inputTypes = newInputTypes; }
+    void setOutputTypes(const std::set<std::string>& newOutputTypes) { this->outputTypes = newOutputTypes; }
 
   private:
     std::string name;
     std::string type;
     std::string category;
     std::string group;
+    std::set<std::string> inputTypes;
+    std::set<std::string> outputTypes;
 };
 
 // A link connects two pins and includes a unique id and the ids of the two pins it connects
@@ -61,6 +67,7 @@ class Graph
           const mx::FilePathVec& libraryFolders,
           int viewWidth,
           int viewHeight);
+    ~Graph() = default;
 
     mx::DocumentPtr loadDocument(const mx::FilePath& filename);
     void drawGraph(ImVec2 mousePos);
@@ -74,8 +81,6 @@ class Graph
     {
         _fontScale = val;
     }
-
-    ~Graph(){};
 
   private:
     mx::ElementPredicate getElementPredicate() const;
@@ -104,6 +109,9 @@ class Graph
 
     // Check if link exists in the current link vector
     bool linkExists(Link newLink);
+
+    // Check if link can be added. Show a diagnostic message as the label.
+    bool checkCanAddLink(ed::PinId startPinId, ed::PinId endPinId);
 
     // Add link to nodegraph and set up connections between UiNodes and
     // MaterialX Nodes to update shader
@@ -182,11 +190,17 @@ class Graph
     // Add input pointer to node based on input pin
     void addNodeInput(UiNodePtr node, mx::InputPtr& input);
 
+    // Traversal methods
     void upNodeGraph();
+    UiNodePtr traverseConnection(UiNodePtr node, bool traverseDownstream);
 
-    // Set the value of the selected node constants in the node property editor
-    void setConstant(UiNodePtr node, mx::InputPtr& input, const mx::UIProperties& uiProperties);
-
+    // Show input values in property editor for a given input
+    void showPropertyEditorValue(UiNodePtr node, mx::InputPtr& input, const mx::UIProperties& uiProperties);
+    // Show input connections in property editor for a given node
+    void showPropertyEditorOutputConnections(UiNodePtr node);
+    // Show output connections in property editor for a given output pin
+    void showPropertyEditorInputConnection(UiPinPtr pin);
+    // Show property editor for a given node
     void propertyEditor();
     void setDefaults(mx::InputPtr input);
 
@@ -235,7 +249,7 @@ class Graph
 
     RenderViewPtr _renderer;
 
-    // document and intializing information
+    // document and initializing information
     mx::FilePath _materialFilename;
     mx::DocumentPtr _graphDoc;
     mx::StringSet _xincludeFiles;
@@ -248,7 +262,7 @@ class Graph
     mx::ImagePtr _image;
     mx::ImageHandlerPtr _imageHandler;
 
-    // containers of node informatin
+    // containers of node information
     std::vector<UiNodePtr> _graphNodes;
     std::vector<UiPinPtr> _currPins;
     std::vector<Link> _currLinks;
@@ -307,6 +321,11 @@ class Graph
     int _frameCount;
     // used for filtering pins when connecting links
     std::string _pinFilterType;
+    // used for filtering pins when adding a node from a link
+    std::string _menuFilterType;
+    // used for auto connecting pins if a node is added by drawing a link from a pin
+    ed::PinId _pinIdToLinkFrom;
+    ed::PinId _pinIdToLinkTo;
 
     // DPI scaling for fonts
     float _fontScale;

@@ -8,6 +8,10 @@
 
 #include <MaterialXFormat/Util.h>
 
+#ifdef MATERIALX_BUILD_OCIO
+#include <MaterialXGenShader/OcioColorManagementSystem.h>
+#endif
+
 namespace mx = MaterialX;
 
 namespace RenderUtil
@@ -36,7 +40,7 @@ void ShaderRenderTester::getGenerationOptions(const GenShaderUtil::TestSuiteOpti
         reducedOption.shaderInterfaceType = mx::SHADER_INTERFACE_REDUCED;
         optionsList.push_back(reducedOption);
     }
-    // Alway fallback to complete if no options specified.
+    // Always fallback to complete if no options specified.
     if ((testOptions.shaderInterfaces & 2) || optionsList.empty())
     {
         mx::GenOptions completeOption = originalOptions;
@@ -48,7 +52,7 @@ void ShaderRenderTester::getGenerationOptions(const GenShaderUtil::TestSuiteOpti
 void ShaderRenderTester::printRunLog(const RenderProfileTimes &profileTimes,
                                      const GenShaderUtil::TestSuiteOptions& options,
                                      std::ostream& stream,
-                                     mx::DocumentPtr dependLib)
+                                     mx::DocumentPtr)
 {
     profileTimes.print(stream);
 
@@ -121,12 +125,29 @@ bool ShaderRenderTester::validate(const mx::FilePath optionsFilePath)
     // Data search path
     mx::FileSearchPath searchPath = mx::getDefaultDataSearchPath();
 
+    const std::string MTLX_EXTENSION("mtlx");
     mx::ScopedTimer ioTimer(&profileTimes.ioTime);
-    mx::FilePathVec dirs;
+    mx::FilePathVec files;
     for (const auto& root : options.renderTestPaths)
     {
-        mx::FilePathVec testRootDirs = searchPath.find(root).getSubDirectories();
-        dirs.insert(std::end(dirs), std::begin(testRootDirs), std::end(testRootDirs));
+        auto resolvedRoot = searchPath.find(root);
+        if (!resolvedRoot.exists())
+            continue;
+        if (resolvedRoot.isDirectory())
+        {
+            mx::FilePathVec testRootDirs = searchPath.find(root).getSubDirectories();
+            for (auto& dir : testRootDirs)
+            {
+                mx::FilePathVec dirFiles = dir.getFilesInDirectory(MTLX_EXTENSION);
+                files.reserve(files.size() + dirFiles.size());
+                for (auto& file: dirFiles)
+                    files.push_back(dir / file);
+            }
+        }
+        else
+        {
+            files.push_back(resolvedRoot);
+        }
     }
     ioTimer.endTimer();
 
@@ -142,7 +163,24 @@ bool ShaderRenderTester::validate(const mx::FilePath optionsFilePath)
 
     createRenderer(log);
 
-    mx::ColorManagementSystemPtr colorManagementSystem = mx::DefaultColorManagementSystem::create(_shaderGenerator->getTarget());
+    addSkipFiles();
+
+    mx::ColorManagementSystemPtr colorManagementSystem;
+#ifdef MATERIALX_BUILD_OCIO
+    try
+    {
+        colorManagementSystem =
+            mx::OcioColorManagementSystem::createFromBuiltinConfig(
+                "ocio://studio-config-latest",
+                _shaderGenerator->getTarget());
+    }
+    catch (const std::exception& /*e*/)
+    {
+        colorManagementSystem = mx::DefaultColorManagementSystem::create(_shaderGenerator->getTarget());
+    }
+#else
+    colorManagementSystem = mx::DefaultColorManagementSystem::create(_shaderGenerator->getTarget());
+#endif
     colorManagementSystem->loadLibrary(dependLib);
     _shaderGenerator->setColorManagementSystem(colorManagementSystem);
 
@@ -185,91 +223,89 @@ bool ShaderRenderTester::validate(const mx::FilePath optionsFilePath)
 
     mx::StringSet usedImpls;
 
-    const std::string MTLX_EXTENSION("mtlx");
-    for (const auto& dir : dirs)
+    for (const mx::FilePath& filename : files)
     {
         ioTimer.startTimer();
-        mx::FilePathVec files;
-        files = dir.getFilesInDirectory(MTLX_EXTENSION);
+        // Check if a file override set is used and ignore all files
+        // not part of the override set
+        if (testfileOverride.size() && testfileOverride.count(filename.getBaseName()) == 0)
+        {
+            ioTimer.endTimer();
+            continue;
+        }
+
+        if (_skipFiles.count(filename.getBaseName()) > 0)
+        {
+            ioTimer.endTimer();
+            continue;
+        }
+
+        mx::DocumentPtr doc = mx::createDocument();
+        try
+        {
+            mx::readFromXmlFile(doc, filename, searchPath);
+        }
+        catch (mx::Exception& e)
+        {
+            docValidLog << "Failed to load in file: " << filename.asString() << ". Error: " << e.what() << std::endl;
+            WARN("Failed to load in file: " + filename.asString() + "See: " + docValidLogFilename + " for details.");
+        }
+
+        // For each new file clear the implementation cache.
+        // Since the new file might contain implementations with names
+        // colliding with implementations in previous test cases.
+        context.clearNodeImplementations();
+
+        doc->setDataLibrary(dependLib);
+
+        // Register types from the document.
+        _shaderGenerator->registerTypeDefs(doc);
+
         ioTimer.endTimer();
 
-        for (const mx::FilePath& file : files)
+        validateTimer.startTimer();
+        log << "MTLX Filename: " << filename.asString() << std::endl;
+
+        // Validate the test document
+        std::string validationErrors;
+        bool validDoc = doc->validate(&validationErrors);
+        if (!validDoc)
         {
-            ioTimer.startTimer();
-            // Check if a file override set is used and ignore all files
-            // not part of the override set
-            if (testfileOverride.size() && testfileOverride.count(file) == 0)
-            {
-                ioTimer.endTimer();
-                continue;
-            }
+            docValidLog << filename.asString() << std::endl;
+            docValidLog << validationErrors << std::endl;
+        }
+        validateTimer.endTimer();
+        CHECK(validDoc);
 
-            const mx::FilePath filename = mx::FilePath(dir) / mx::FilePath(file);
-            mx::DocumentPtr doc = mx::createDocument();
-            try
-            {
-                mx::FileSearchPath readSearchPath(searchPath);
-                readSearchPath.append(dir);
-                mx::readFromXmlFile(doc, filename, readSearchPath);
-            }
-            catch (mx::Exception& e)
-            {
-                docValidLog << "Failed to load in file: " << filename.asString() << ". Error: " << e.what() << std::endl;
-                WARN("Failed to load in file: " + filename.asString() + "See: " + docValidLogFilename + " for details.");
-            }
+        mx::FileSearchPath imageSearchPath(filename.getParentPath());
+        imageSearchPath.append(searchPath);
 
-            // For each new file clear the implementation cache.
-            // Since the new file might contain implementations with names
-            // colliding with implementations in previous test cases.
-            context.clearNodeImplementations();
+        // Resolve file names if specified
+        if (_resolveImageFilenames)
+        {
+            mx::flattenFilenames(doc, imageSearchPath, _customFilenameResolver);
+        }
 
-            doc->setDataLibrary(dependLib);
-            ioTimer.endTimer();
+        mx::FilePath outputPath = filename;
+        outputPath.removeExtension();
 
-            validateTimer.startTimer();
-            log << "MTLX Filename: " << filename.asString() << std::endl;
+        renderableSearchTimer.startTimer();
+        std::vector<mx::TypedElementPtr> elements;
+        try
+        {
+            elements = mx::findRenderableElements(doc);
+        }
+        catch (mx::Exception& e)
+        {
+            docValidLog << e.what() << std::endl;
+            WARN("Shader generation error in " + filename.asString() + ": " + e.what());
+        }
+        renderableSearchTimer.endTimer();
 
-            // Validate the test document
-            std::string validationErrors;
-            bool validDoc = doc->validate(&validationErrors);
-            if (!validDoc)
-            {
-                docValidLog << filename.asString() << std::endl;
-                docValidLog << validationErrors << std::endl;
-            }
-            validateTimer.endTimer();
-            CHECK(validDoc);
-
-            mx::FileSearchPath imageSearchPath(dir);
-            imageSearchPath.append(searchPath);
-            
-            // Resolve file names if specified
-            if (_resolveImageFilenames)
-            {
-                mx::flattenFilenames(doc, imageSearchPath, _customFilenameResolver);
-            }
-
-            mx::FilePath outputPath = mx::FilePath(dir) / file;
-            outputPath.removeExtension();
-
-            renderableSearchTimer.startTimer();
-            std::vector<mx::TypedElementPtr> elements;
-            try
-            {
-                elements = mx::findRenderableElements(doc);
-            }
-            catch (mx::Exception& e)
-            {
-                docValidLog << e.what() << std::endl;
-                WARN("Shader generation error in " + filename.asString() + ": " + e.what());
-            }
-            renderableSearchTimer.endTimer();
-
-            for (const auto& element : elements)
-            {
-                mx::string elementName = mx::createValidName(mx::replaceSubstrings(element->getNamePath(), pathMap));
-                runRenderer(elementName, element, context, doc, log, options, profileTimes, imageSearchPath, outputPath, nullptr);
-            }
+        for (const auto& element : elements)
+        {
+            mx::string elementName = mx::createValidName(mx::replaceSubstrings(element->getNamePath(), pathMap));
+            runRenderer(elementName, element, context, doc, log, options, profileTimes, imageSearchPath, outputPath, nullptr);
         }
     }
 
@@ -414,9 +450,9 @@ void ShaderRenderTester::addAdditionalTestStreams(mx::MeshPtr mesh)
         mesh->addStream(geomColor4Stream);
     }
 
-    auto sineData = [](float uv, float freq){
+    auto sineData = [](float texCoord, float freq){
         const float PI = std::acos(-1.0f);
-        float angle = uv * 2 * PI * freq;
+        float angle = texCoord * 2 * PI * freq;
         return std::sin(angle) / 2.0f + 1.0f;
     };
     if (!uv.empty())

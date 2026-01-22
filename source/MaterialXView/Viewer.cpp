@@ -25,6 +25,9 @@
 
 #include <MaterialXGenShader/DefaultColorManagementSystem.h>
 #include <MaterialXGenShader/ShaderTranslator.h>
+#ifdef MATERIALX_BUILD_OCIO
+#include <MaterialXGenShader/OcioColorManagementSystem.h>
+#endif
 
 #if MATERIALX_BUILD_GEN_MDL
 #include <MaterialXGenMdl/MdlShaderGenerator.h>
@@ -45,6 +48,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <limits>
 
 const mx::Vector3 DEFAULT_CAMERA_POSITION(0.0f, 0.0f, 5.0f);
 const float DEFAULT_CAMERA_VIEW_ANGLE = 45.0f;
@@ -60,6 +64,9 @@ const bool USE_FLOAT_BUFFER = false;
 
 const int MIN_ENV_SAMPLE_COUNT = 4;
 const int MAX_ENV_SAMPLE_COUNT = 1024;
+
+const int MIN_AIRY_FRESNEL_ITERATIONS = 1;
+const int MAX_AIRY_FRESNEL_ITERATIONS = 8;
 
 const int SHADOW_MAP_SIZE = 2048;
 const int ALBEDO_TABLE_SIZE = 128;
@@ -78,6 +85,8 @@ const float IDEAL_ENV_MAP_RADIANCE = 6.0f;
 const float IDEAL_MESH_SPHERE_RADIUS = 2.0f;
 
 const float PI = std::acos(-1.0f);
+
+const std::string UDIM_SEPARATORS = "._";
 
 void writeTextFile(const std::string& text, const std::string& filePath)
 {
@@ -115,7 +124,7 @@ void applyModifiers(mx::DocumentPtr doc, const DocumentModifiers& modifiers)
                 elem->setFilePrefix(filePrefix + modifiers.filePrefixTerminator);
             }
         }
-        std::vector<mx::ElementPtr> children = elem->getChildren();
+        mx::ElementVec children = elem->getChildren();
         for (mx::ElementPtr child : children)
         {
             if (modifiers.skipElements.count(child->getCategory()) ||
@@ -189,17 +198,18 @@ Viewer::Viewer(const std::string& materialFilename,
     _envCamera(mx::Camera::create()),
     _shadowCamera(mx::Camera::create()),
     _lightHandler(mx::LightHandler::create()),
+    _typeSystem(mx::TypeSystem::create()),
 #ifndef MATERIALXVIEW_METAL_BACKEND
-    _genContext(mx::GlslShaderGenerator::create()),
-    _genContextEssl(mx::EsslShaderGenerator::create()),
+    _genContext(mx::GlslShaderGenerator::create(_typeSystem)),
+    _genContextEssl(mx::EsslShaderGenerator::create(_typeSystem)),
 #else
-    _genContext(mx::MslShaderGenerator::create()),
+    _genContext(mx::MslShaderGenerator::create(_typeSystem)),
 #endif
 #if MATERIALX_BUILD_GEN_OSL
-    _genContextOsl(mx::OslShaderGenerator::create()),
+    _genContextOsl(mx::OslShaderGenerator::create(_typeSystem)),
 #endif
 #if MATERIALX_BUILD_GEN_MDL
-    _genContextMdl(mx::MdlShaderGenerator::create()),
+    _genContextMdl(mx::MdlShaderGenerator::create(_typeSystem)),
 #endif
     _unitRegistry(mx::UnitConverterRegistry::create()),
     _drawEnvironment(false),
@@ -702,7 +712,7 @@ void Viewer::createDocumentationInterface(ng::ref<Widget> parent)
                                                              ng::Alignment::Minimum, 2, 2);
     gridLayout2->set_col_alignment({ ng::Alignment::Minimum, ng::Alignment::Maximum });
 
-    const std::vector<std::pair<std::string, std::string>> KEYBOARD_SHORTCUTS =
+    const std::array<std::pair<std::string, std::string>, 16> KEYBOARD_SHORTCUTS =
     {
         std::make_pair("R", "Reload the current material from file. "
                             "Hold SHIFT to reload all standard libraries as well."),
@@ -883,6 +893,26 @@ void Viewer::createAdvancedSettings(ng::ref<Widget> parent)
     sampleBox->set_callback([this](int index)
     {
         _lightHandler->setEnvSampleCount(MIN_ENV_SAMPLE_COUNT * (int) std::pow(4, index));
+    });
+
+    ng::ref<ng::Widget> fresnelGroup = new Widget(settingsGroup);
+    fresnelGroup->set_layout(new ng::BoxLayout(ng::Orientation::Horizontal));
+    new ng::Label(fresnelGroup, "Airy Fresnel Iterations:");
+    mx::StringVec fresnelOptions;
+    for (int i = MIN_AIRY_FRESNEL_ITERATIONS; i <= MAX_AIRY_FRESNEL_ITERATIONS; i *= 2)
+    {
+        fresnelOptions.push_back(std::to_string(i));
+    }
+    ng::ref<ng::ComboBox> fresnelBox = new ng::ComboBox(fresnelGroup, fresnelOptions);
+    fresnelBox->set_chevron_icon(-1);
+    fresnelBox->set_selected_index((int)std::log2(_genContext.getOptions().hwAiryFresnelIterations / MIN_AIRY_FRESNEL_ITERATIONS));
+    fresnelBox->set_callback([this](int index)
+    {
+        _genContext.getOptions().hwAiryFresnelIterations = MIN_AIRY_FRESNEL_ITERATIONS * (int)std::pow(2, index);
+#ifndef MATERIALXVIEW_METAL_BACKEND
+        _genContextEssl.getOptions().hwAiryFresnelIterations = _genContext.getOptions().hwAiryFresnelIterations;
+#endif
+        reloadShaders();
     });
 
     ng::ref<ng::Label> lightingLabel = new ng::Label(settingsGroup, "Lighting Options");
@@ -1315,6 +1345,9 @@ void Viewer::loadDocument(const mx::FilePath& filename, mx::DocumentPtr librarie
         // Apply modifiers to the content document.
         applyModifiers(doc, _modifiers);
 
+        // Register any data types in the document.
+        _genContext.getShaderGenerator().registerTypeDefs(doc);
+
         // Flatten subgraphs if requested.
         if (_flattenSubgraphs)
         {
@@ -1406,18 +1439,18 @@ void Viewer::loadDocument(const mx::FilePath& filename, mx::DocumentPtr librarie
             extendedSearchPath.append(_materialSearchPath);
             _imageHandler->setSearchPath(extendedSearchPath);
 
+            // Clear cached implementations, in case libraries on the file system have changed.
+            _genContext.clearNodeImplementations();
+#ifndef MATERIALXVIEW_METAL_BACKEND
+            _genContextEssl.clearNodeImplementations();
+#endif
+
             // Add new materials to the global vector.
             _materials.insert(_materials.end(), newMaterials.begin(), newMaterials.end());
 
             mx::MaterialPtr udimMaterial = nullptr;
             for (mx::MaterialPtr mat : newMaterials)
             {
-                // Clear cached implementations, in case libraries on the file system have changed.
-                _genContext.clearNodeImplementations();
-#ifndef MATERIALXVIEW_METAL_BACKEND
-                _genContextEssl.clearNodeImplementations();
-#endif
-
                 mx::TypedElementPtr elem = mat->getElement();
 
                 std::string udim = mat->getUdim();
@@ -1486,13 +1519,25 @@ void Viewer::loadDocument(const mx::FilePath& filename, mx::DocumentPtr librarie
                 }
             }
 
-            // Apply implicit udim assignments, if any.
+            // Apply UDIM assignments, if any.
             for (mx::MaterialPtr mat : newMaterials)
             {
                 mx::NodePtr materialNode = mat->getMaterialNode();
                 if (materialNode)
                 {
+                    // First check for implicit UDIM assignments.
                     std::string udim = mat->getUdim();
+                    if (udim.empty())
+                    {
+                        // Fall back to name-based UDIM assignments.
+                        for (const std::string& token : mx::splitString(materialNode->getName(), UDIM_SEPARATORS))
+                        {
+                            if (token.size() == 4 && std::all_of(token.begin(), token.end(), isdigit))
+                            {
+                                udim = token;
+                            }
+                        }
+                    }
                     if (!udim.empty())
                     {
                         for (mx::MeshPartitionPtr geom : _geometryList)
@@ -1749,7 +1794,21 @@ void Viewer::initContext(mx::GenContext& context)
     context.registerSourceCodeSearchPath(_searchPath);
 
     // Initialize color management.
-    mx::DefaultColorManagementSystemPtr cms = mx::DefaultColorManagementSystem::create(context.getShaderGenerator().getTarget());
+    mx::ColorManagementSystemPtr cms;
+#ifdef MATERIALX_BUILD_OCIO
+    try
+    {
+        cms = mx::OcioColorManagementSystem::createFromBuiltinConfig(
+            "ocio://studio-config-latest",
+            context.getShaderGenerator().getTarget());
+    }
+    catch (const std::exception& /*e*/)
+    {
+        cms = mx::DefaultColorManagementSystem::create(context.getShaderGenerator().getTarget());
+    }
+#else
+    cms = mx::DefaultColorManagementSystem::create(context.getShaderGenerator().getTarget());
+#endif
     cms->loadLibrary(_stdLib);
     context.getShaderGenerator().setColorManagementSystem(cms);
 
@@ -1759,9 +1818,6 @@ void Viewer::initContext(mx::GenContext& context)
     unitSystem->setUnitConverterRegistry(_unitRegistry);
     context.getShaderGenerator().setUnitSystem(unitSystem);
     context.getOptions().targetDistanceUnit = "meter";
-
-    // Initialize the struct typedefs from the stdlib
-    context.getShaderGenerator().loadStructTypeDefs(_stdLib);
 }
 
 void Viewer::loadStandardLibraries()
@@ -1793,7 +1849,7 @@ void Viewer::loadStandardLibraries()
     // Create the list of supported distance units.
     auto unitScales = _distanceUnitConverter->getUnitScale();
     _distanceUnitOptions.resize(unitScales.size());
-    for (auto unitScale : unitScales)
+    for (const auto& unitScale : unitScales)
     {
         int location = _distanceUnitConverter->getUnitAsInteger(unitScale.first);
         _distanceUnitOptions[location] = unitScale.first;
@@ -2186,6 +2242,8 @@ void Viewer::draw_contents()
     }
 
     // Render the current frame.
+    constexpr auto FRAME_MAX_VALUE = std::numeric_limits<decltype(_renderPipeline->_frame)>::max();
+    _renderPipeline->_frame = (_renderPipeline->_frame + 1) % FRAME_MAX_VALUE;
     try
     {
         _renderPipeline->renderFrame(_colorTexture,
@@ -2412,7 +2470,7 @@ void Viewer::updateCameras()
     _envCamera->setViewMatrix(_viewCamera->getViewMatrix());
     _envCamera->setProjectionMatrix(_viewCamera->getProjectionMatrix());
 
-    mx::NodePtr dirLight = _lightHandler->getFirstLightOfCategory(DIR_LIGHT_NODE_CATEGORY);
+    mx::NodePtr dirLight = !_materialAssignments.empty() ? _lightHandler->getFirstLightOfCategory(DIR_LIGHT_NODE_CATEGORY) : nullptr;
     if (dirLight)
     {
         mx::Vector3 sphereCenter = (_geometryHandler->getMaximumBounds() + _geometryHandler->getMinimumBounds()) * 0.5;

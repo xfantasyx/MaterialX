@@ -6,7 +6,6 @@
 #include <PyMaterialX/PyMaterialX.h>
 
 #include <MaterialXGenShader/GenContext.h>
-#include <MaterialXGenShader/HwShaderGenerator.h>
 
 namespace py = pybind11;
 namespace mx = MaterialX;
@@ -19,6 +18,7 @@ void bindPyGenContext(py::module& mod)
         .def(py::init<mx::ShaderGeneratorPtr>())
         .def("getShaderGenerator", &mx::GenContext::getShaderGenerator)
         .def("getOptions", static_cast<mx::GenOptions & (mx::GenContext::*)()>(&mx::GenContext::getOptions), py::return_value_policy::reference)
+        .def("getTypeDesc", &mx::GenContext::getTypeDesc)
         .def("registerSourceCodeSearchPath", static_cast<void (mx::GenContext::*)(const mx::FilePath&)>(&mx::GenContext::registerSourceCodeSearchPath))
         .def("registerSourceCodeSearchPath", static_cast<void (mx::GenContext::*)(const mx::FileSearchPath&)>(&mx::GenContext::registerSourceCodeSearchPath))
         .def("resolveSourceFile", &mx::GenContext::resolveSourceFile)

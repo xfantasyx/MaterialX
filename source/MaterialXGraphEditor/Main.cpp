@@ -14,6 +14,7 @@
 #include <GLFW/glfw3.h>
 
 #include <iostream>
+#include <limits>
 
 namespace
 {
@@ -30,6 +31,8 @@ const std::string options =
     "    --path [FILEPATH]              Specify an additional data search path location (e.g. '/projects/MaterialX').  This absolute path will be queried when locating data libraries, XInclude references, and referenced images.\n"
     "    --library [FILEPATH]           Specify an additional data library folder (e.g. 'vendorlib', 'studiolib').  This relative path will be appended to each location in the data search path when loading data libraries.\n"
     "    --uiScale [FACTOR]             Manually specify a UI scaling factor\n"
+    "    --font [FILENAME]              Specify the name of the custom font file to use.  If not specified the default font will be used.\n"
+    "    --fontSize [SIZE]              Specify font size to use for the custom font.  If not specified a default of 18 will be used.\n"
     "    --captureFilename [FILENAME]   Specify the filename to which the first rendered frame should be written\n"
     "    --help                         Display the complete list of command-line options\n";
 
@@ -67,6 +70,8 @@ int main(int argc, char* const argv[])
     int viewWidth = 256;
     int viewHeight = 256;
     float uiScale = 0.0f;
+    std::string fontFilename;
+    int fontSize = 18;
     std::string captureFilename;
 
     for (size_t i = 0; i < tokens.size(); i++)
@@ -101,6 +106,14 @@ int main(int argc, char* const argv[])
         else if (token == "--uiScale")
         {
             parseToken(nextToken, "float", uiScale);
+        }
+        else if (token == "--font")
+        {
+            parseToken(nextToken, "string", fontFilename);
+        }
+        else if (token == "--fontSize")
+        {
+            parseToken(nextToken, "integer", fontSize);
         }
         else if (token == "--captureFilename")
         {
@@ -154,6 +167,13 @@ int main(int argc, char* const argv[])
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 #endif
 
+    // When captureFilename is specified, make window invisible
+    // to avoid issues with headless rendering.
+    if (!captureFilename.empty())
+    {
+        glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
+    }
+
     // Create window with graphics context
     GLFWwindow* window = glfwCreateWindow(1280, 960, "MaterialX Graph Editor", NULL, NULL);
     if (!window)
@@ -172,7 +192,15 @@ int main(int argc, char* const argv[])
     io.IniFilename = NULL;
     io.LogFilename = NULL;
 
-    io.Fonts->AddFontDefault();
+    ImFont* customFont = nullptr;
+    if (!fontFilename.empty())
+    {
+        customFont = io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), fontSize);
+    }
+    if (!customFont)
+    {
+        io.Fonts->AddFontDefault();
+    }
 
     // Setup Dear ImGui style
     ImGui::StyleColorsDark();
@@ -233,7 +261,10 @@ int main(int argc, char* const argv[])
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        graph->getRenderer()->drawContents();
+        auto renderer = graph->getRenderer();
+        constexpr auto FRAME_MAX_VALUE = std::numeric_limits<unsigned int>::max();
+        renderer->setFrame((renderer->getFrame() + 1) % FRAME_MAX_VALUE);
+        renderer->drawContents();
         if (!captureFilename.empty())
         {
             break;

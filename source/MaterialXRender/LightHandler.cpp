@@ -5,7 +5,7 @@
 
 #include <MaterialXRender/LightHandler.h>
 
-#include <MaterialXGenShader/HwShaderGenerator.h>
+#include <MaterialXGenHw/HwShaderGenerator.h>
 #include <MaterialXGenShader/GenContext.h>
 
 MATERIALX_NAMESPACE_BEGIN
@@ -41,8 +41,7 @@ void LightHandler::findLights(DocumentPtr doc, vector<NodePtr>& lights)
     lights.clear();
     for (NodePtr node : doc->getNodes())
     {
-        const TypeDesc type = TypeDesc::get(node->getType());
-        if (type == Type::LIGHTSHADER)
+        if (node->getType() == LIGHT_SHADER_TYPE_STRING)
         {
             lights.push_back(node);
         }

@@ -5,6 +5,8 @@
 
 #include <MaterialXGenGlsl/GlslResourceBindingContext.h>
 
+#include <MaterialXGenShader/GenContext.h>
+
 MATERIALX_NAMESPACE_BEGIN
 
 //
@@ -137,12 +139,12 @@ void GlslResourceBindingContext::emitStructuredResourceBindings(GenContext& cont
         if (it == alignmentMap.end())
         {
             structSize += baseAlignment;
-            memberOrder.push_back(std::make_pair(baseAlignment, i));
+            memberOrder.emplace_back(baseAlignment, i);
         }
         else
         {
             structSize += it->second;
-            memberOrder.push_back(std::make_pair(it->second, i));
+            memberOrder.emplace_back(it->second, i);
         }
     }
 

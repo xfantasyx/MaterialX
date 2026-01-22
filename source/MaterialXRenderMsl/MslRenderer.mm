@@ -6,7 +6,6 @@
 #include <MaterialXRenderMsl/MslRenderer.h>
 #include <MaterialXRenderHw/SimpleWindow.h>
 #include <MaterialXRender/TinyObjLoader.h>
-#include <MaterialXGenShader/HwShaderGenerator.h>
 
 #include <iostream>
 
@@ -139,14 +138,14 @@ void MslRenderer::createFrameBuffer(bool encodeSrgb)
 
 void MslRenderer::setSize(unsigned int width, unsigned int height)
 {
+    _width = width;
+    _height = height;
     if (_framebuffer)
     {
         _framebuffer->resize(width, height);
     }
     else
     {
-        _width = width;
-        _height = height;
         createFrameBuffer(true);
     }
 }
